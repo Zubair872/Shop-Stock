@@ -133,6 +133,7 @@ async function handleCheckout() {
       <Dashboard />
     </main>
   </div>
+
 </template>
 
 <style>
