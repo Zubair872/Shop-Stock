@@ -1,10 +1,8 @@
 <script setup>
 import { reactive } from "vue";
-import { addProduct } from "../services/api.js";
 
 const emit = defineEmits(["add-product"]);
 
-// reactive: ek object banata hai jiske values change hone par UI khud-b-khud update ho
 const form = reactive({
   name: "",
   category: "",
@@ -12,17 +10,16 @@ const form = reactive({
   stock: "",
 });
 
-async function handleSubmit() {
-  // khaali form submit na hone do
-  if (!form.name || !form.price) return;
+function handleSubmit() {
+  if (!form.name.trim() || form.price === "") return;
 
-  // backend ko data bhejo aur save karwao
-  const savedProduct = await addProduct({ ...form });
+  emit("add-product", {
+    name: form.name.trim(),
+    category: form.category.trim(),
+    price: Number(form.price),
+    stock: Number(form.stock) || 0,
+  });
 
-  // parent (App.vue / ProductList) ko batao ke naya product save ho gaya
-  emit("add-product", savedProduct);
-
-  // form ko wapis khaali kar do
   form.name = "";
   form.category = "";
   form.price = "";
@@ -31,15 +28,13 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <!-- @submit.prevent: page refresh hone se roko (default HTML behavior) -->
   <form class="product-form" @submit.prevent="handleSubmit">
     <h3>Naya Product Add Karein</h3>
 
-    <!-- v-model: input ki value seedha form.name se connect (two-way binding) -->
     <input v-model="form.name" placeholder="Product Name" required />
     <input v-model="form.category" placeholder="Category (e.g. Cake)" />
-    <input v-model="form.price" type="number" placeholder="Price" required />
-    <input v-model="form.stock" type="number" placeholder="Stock" />
+    <input v-model="form.price" type="number" min="0" placeholder="Price" required />
+    <input v-model="form.stock" type="number" min="0" placeholder="Stock" />
 
     <button type="submit">Add Product</button>
   </form>

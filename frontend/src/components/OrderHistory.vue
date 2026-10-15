@@ -4,14 +4,16 @@ import { getOrders } from "../services/api.js";
 
 const orders = ref([]);
 
-// onMounted: ye component screen par aate hi orders mangwa lega
 onMounted(async () => {
   orders.value = await getOrders();
 });
 
-// date ko readable format mein dikhane ke liye chota helper
 function formatDate(isoString) {
   return new Date(isoString).toLocaleString();
+}
+
+function shortId(id) {
+  return String(id).slice(-6).toUpperCase();
 }
 </script>
 
@@ -21,14 +23,13 @@ function formatDate(isoString) {
 
     <p v-if="orders.length === 0" class="empty">Abhi tak koi order nahi hua.</p>
 
-    <!-- .slice().reverse(): naye orders sabse upar dikhane ke liye -->
     <div
       class="order-card"
       v-for="order in [...orders].reverse()"
       :key="order.id"
     >
       <div class="order-header">
-        <span>Order #{{ order.id }}</span>
+        <span>Order #{{ shortId(order.id) }}</span>
         <span>{{ formatDate(order.date) }}</span>
       </div>
 

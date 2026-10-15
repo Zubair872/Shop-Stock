@@ -5,58 +5,109 @@ import ProductForm from "./components/ProductForm.vue";
 import Cart from "./components/Cart.vue";
 import OrderHistory from "./components/OrderHistory.vue";
 import Dashboard from "./components/Dashboard.vue";
+import AuthForm from "./components/AuthForm.vue";
 import {
   getProducts,
   addProduct,
   updateProduct,
   deleteProduct,
   placeOrder,
+  getMe,
+  getToken,
+  setToken,
+  setUnauthorizedHandler,
+  errorMessage,
 } from "./services/api.js";
 
-// activeTab: batata hai abhi kaunsa page dikh raha hai ("shop", "orders", "dashboard")
 const activeTab = ref("shop");
+const user = ref(null);
+const checking = ref(true);
+const products = ref([]);
+const cart = ref([]);
 
-// ref: ek reactive variable banata hai (single value ke liye reactive() ki jagah ref() use hota hai)
-const products = ref([]); // sab products yahan store honge
-const cart = ref([]);     // cart mein jo items hain
-
-// onMounted: component screen par aane ke turant baad ye chalta hai
-onMounted(async () => {
-  products.value = await getProducts(); // backend se products mangwao
-});
-
-// ---- Product management ----
-async function handleAddProduct(newProduct) {
-  const saved = await addProduct(newProduct); // backend ko bhejo
-  products.value.push(saved);                  // list mein bhi add karo (UI update)
+function resetData() {
+  products.value = [];
+  cart.value = [];
+  activeTab.value = "shop";
 }
 
-async function handleDeleteProduct(id) {
-  await deleteProduct(id);
-  products.value = products.value.filter((p) => p.id !== id);
+function handleLogout() {
+  setToken("");
+  user.value = null;
+  resetData();
 }
 
-// Edit se aane wala update handle karo
-async function handleUpdateProduct(updates) {
-  const { id, ...rest } = updates;
-  const updated = await updateProduct(id, rest); // backend ko bhejo
+async function handleAuthenticated({ token, user: loggedInUser }) {
+  setToken(token);
+  user.value = loggedInUser;
+  resetData();
 
-  // local list mein bhi us product ko naye data se replace karo
-  const index = products.value.findIndex((p) => p.id === id);
-  if (index !== -1) {
-    products.value[index] = updated;
+  try {
+    products.value = await getProducts();
+  } catch (error) {
+    alert(errorMessage(error));
   }
 }
 
-// ---- Cart management ----
+onMounted(async () => {
+  setUnauthorizedHandler(handleLogout);
+
+  if (getToken()) {
+    try {
+      const data = await getMe();
+      user.value = data.user;
+      products.value = await getProducts();
+    } catch {
+      setToken("");
+      user.value = null;
+    }
+  }
+
+  checking.value = false;
+});
+
+async function handleAddProduct(newProduct) {
+  try {
+    const saved = await addProduct(newProduct);
+    products.value.push(saved);
+  } catch (error) {
+    alert(errorMessage(error));
+  }
+}
+
+async function handleDeleteProduct(id) {
+  try {
+    await deleteProduct(id);
+    products.value = products.value.filter((p) => p.id !== id);
+    cart.value = cart.value.filter((item) => item.id !== id);
+  } catch (error) {
+    alert(errorMessage(error));
+  }
+}
+
+async function handleUpdateProduct(updates) {
+  const { id, ...rest } = updates;
+
+  try {
+    const updated = await updateProduct(id, rest);
+    const index = products.value.findIndex((p) => p.id === id);
+    if (index !== -1) {
+      products.value[index] = updated;
+    }
+  } catch (error) {
+    alert(errorMessage(error));
+  }
+}
+
 function handleAddToCart(product) {
-  // check karo agar ye product cart mein pehle se hai
   const existing = cart.value.find((item) => item.id === product.id);
 
   if (existing) {
-    existing.qty++; // agar hai to quantity barhao
+    if (existing.qty < product.stock) {
+      existing.qty++;
+    }
   } else {
-    cart.value.push({ ...product, qty: 1 }); // warna naya item add karo
+    cart.value.push({ ...product, qty: 1 });
   }
 }
 
@@ -64,76 +115,86 @@ function handleRemoveFromCart(id) {
   cart.value = cart.value.filter((item) => item.id !== id);
 }
 
-// ---- Checkout ----
 async function handleCheckout() {
-  await placeOrder(cart.value);      // backend ko order bhejo
-  cart.value = [];                    // cart khaali karo
-  products.value = await getProducts(); // stock update dikhane ke liye products dobara mangwao
-  alert("✅ Order confirm ho gaya!");
+  try {
+    await placeOrder(cart.value);
+    cart.value = [];
+    products.value = await getProducts();
+    alert("✅ Order confirm ho gaya!");
+  } catch (error) {
+    alert(errorMessage(error));
+    try {
+      products.value = await getProducts();
+    } catch {
+      return;
+    }
+  }
 }
 </script>
 
 <template>
   <div class="app">
-    <header>
-      <h1>Stock management</h1>
+    <p v-if="checking" class="loading">Loading...</p>
 
-      <!-- Tabs: click kar ke activeTab ki value badal dete hain -->
-      <nav class="tabs">
-        <button
-          :class="{ active: activeTab === 'shop' }"
-          @click="activeTab = 'shop'"
-        >
-          Shop
-        </button>
-        <button
-          :class="{ active: activeTab === 'orders' }"
-          @click="activeTab = 'orders'"
-        >
-          Orders
-        </button>
-        <button
-          :class="{ active: activeTab === 'dashboard' }"
-          @click="activeTab = 'dashboard'"
-        >
-          Dashboard
-        </button>
-      </nav>
-    </header>
+    <AuthForm v-else-if="!user" @authenticated="handleAuthenticated" />
 
-    <!-- ===== SHOP TAB ===== -->
-    <main v-if="activeTab === 'shop'" class="layout">
-      <section class="left">
-        <ProductForm @add-product="handleAddProduct" />
+    <template v-else>
+      <header>
+        <h1>{{ user.shopName || "Stock management" }}</h1>
 
-        <ProductList
-          :products="products"
-          @add-to-cart="handleAddToCart"
-          @delete-product="handleDeleteProduct"
-          @update-product="handleUpdateProduct"
-        />
-      </section>
+        <nav class="tabs">
+          <button
+            :class="{ active: activeTab === 'shop' }"
+            @click="activeTab = 'shop'"
+          >
+            Shop
+          </button>
+          <button
+            :class="{ active: activeTab === 'orders' }"
+            @click="activeTab = 'orders'"
+          >
+            Orders
+          </button>
+          <button
+            :class="{ active: activeTab === 'dashboard' }"
+            @click="activeTab = 'dashboard'"
+          >
+            Dashboard
+          </button>
+          <button class="logout" @click="handleLogout">Logout</button>
+        </nav>
+      </header>
 
-      <aside class="right">
-        <Cart
-          :cart-items="cart"
-          @checkout="handleCheckout"
-          @remove-item="handleRemoveFromCart"
-        />
-      </aside>
-    </main>
+      <main v-if="activeTab === 'shop'" class="layout">
+        <section class="left">
+          <ProductForm @add-product="handleAddProduct" />
 
-    <!-- ===== ORDERS TAB ===== -->
-    <main v-else-if="activeTab === 'orders'" class="layout single">
-      <OrderHistory />
-    </main>
+          <ProductList
+            :products="products"
+            @add-to-cart="handleAddToCart"
+            @delete-product="handleDeleteProduct"
+            @update-product="handleUpdateProduct"
+          />
+        </section>
 
-    <!-- ===== DASHBOARD TAB ===== -->
-    <main v-else class="layout single">
-      <Dashboard />
-    </main>
+        <aside class="right">
+          <Cart
+            :cart-items="cart"
+            @checkout="handleCheckout"
+            @remove-item="handleRemoveFromCart"
+          />
+        </aside>
+      </main>
+
+      <main v-else-if="activeTab === 'orders'" class="layout single">
+        <OrderHistory />
+      </main>
+
+      <main v-else class="layout single">
+        <Dashboard />
+      </main>
+    </template>
   </div>
-
 </template>
 
 <style>
@@ -144,6 +205,10 @@ async function handleCheckout() {
 body {
   margin: 0;
   background: #fffdf9;
+}
+.loading {
+  padding: 24px;
+  color: #8a6d3b;
 }
 .app header {
   background: #b5651d;
@@ -158,6 +223,7 @@ body {
 .tabs {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .tabs button {
   background: rgba(255, 255, 255, 0.15);
@@ -171,6 +237,9 @@ body {
   background: white;
   color: #b5651d;
   font-weight: bold;
+}
+.tabs button.logout {
+  background: rgba(0, 0, 0, 0.25);
 }
 .layout {
   display: grid;

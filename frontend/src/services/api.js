@@ -1,50 +1,108 @@
 import axios from "axios";
 
-// Backend jahan chal raha hai uska base URL
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const TOKEN_KEY = "shopstock_token";
 
-// api instance banao - taake baseURL har jagah dobara na likhna pare
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL,
 });
 
-// Sab products fetch karo
-export async function getProducts() {
-  const res = await api.get("/products"); // GET request
-  return res.data; // axios mein response.data mein hi JSON milta hai (res.json() ki zaroorat nahi)
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
 }
 
-// Naya product add karo
-export async function addProduct(product) {
-  const res = await api.post("/products", product); // axios mein seedha object bhej sakte hain
+export function setToken(token) {
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  } catch {
+    return;
+  }
+}
+
+let unauthorizedHandler = null;
+
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
+}
+
+export function errorMessage(error) {
+  return error?.response?.data?.message || "Server se rabta nahi ho saka";
+}
+
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const url = error.config?.url || "";
+    const isAuthRequest = url.startsWith("/auth/login") || url.startsWith("/auth/register");
+
+    if (error.response?.status === 401 && !isAuthRequest && unauthorizedHandler) {
+      unauthorizedHandler();
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+export async function registerUser(details) {
+  const res = await api.post("/auth/register", details);
   return res.data;
 }
 
-// Product update karo (e.g. stock ya price change)
+export async function loginUser(details) {
+  const res = await api.post("/auth/login", details);
+  return res.data;
+}
+
+export async function getMe() {
+  const res = await api.get("/auth/me");
+  return res.data;
+}
+
+export async function getProducts() {
+  const res = await api.get("/products");
+  return res.data;
+}
+
+export async function addProduct(product) {
+  const res = await api.post("/products", product);
+  return res.data;
+}
+
 export async function updateProduct(id, updates) {
   const res = await api.put(`/products/${id}`, updates);
   return res.data;
 }
 
-// Product delete karo
 export async function deleteProduct(id) {
   const res = await api.delete(`/products/${id}`);
   return res.data;
 }
 
-// Order place karo (checkout)
 export async function placeOrder(items) {
   const res = await api.post("/orders", { items });
   return res.data;
 }
 
-// Sab orders fetch karo (Order History page ke liye)
 export async function getOrders() {
   const res = await api.get("/orders");
   return res.data;
 }
 
-// Dashboard stats fetch karo
 export async function getDashboard() {
   const res = await api.get("/dashboard");
   return res.data;
