@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { UNITS } from "../utils/units.js";
 
 const productSchema = new mongoose.Schema(
   {
@@ -16,7 +17,7 @@ const productSchema = new mongoose.Schema(
     lowStockLevel: { type: Number, default: 5, min: 0 },
     unit: {
       type: String,
-      enum: ["pcs", "kg", "g", "litre", "dozen", "packet", "box"],
+      enum: UNITS,
       default: "pcs",
     },
     expiryDate: { type: Date },

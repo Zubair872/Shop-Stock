@@ -32,10 +32,16 @@ async function run() {
 
   let owner = await User.findOne({ email: email.toLowerCase() });
   if (!owner) {
-    owner = await User.create({ name, email, password, shopName });
+    owner = await User.create({ name, email, password, shopName, role: "owner" });
     console.log(`User created: ${owner.email}`);
   } else {
     console.log(`User found: ${owner.email}`);
+  }
+
+  if (!owner.accountId || owner.role !== "owner") {
+    owner.accountId = owner._id;
+    owner.role = "owner";
+    await owner.save();
   }
 
   const existingProducts = await Product.countDocuments({ user: owner._id });

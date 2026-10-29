@@ -1,47 +1,182 @@
 import { Router } from "express";
+import mongoose from "mongoose";
 import Product from "../models/Product.js";
 import Order from "../models/Order.js";
+import { env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { roundMoney } from "../utils/validate.js";
+import { roundQty } from "../utils/units.js";
+import { startOfDaysAgo, dayKeys } from "../utils/dates.js";
 import { serializeProduct } from "../utils/serialize.js";
 
 const router = Router();
 
 router.use(requireAuth);
 
+const RANGES = { today: 1, "7d": 7, "30d": 30, "90d": 90, all: null };
+
+function summaryStage() {
+  return {
+    $group: {
+      _id: null,
+      orders: { $sum: 1 },
+      revenue: { $sum: "$total" },
+      discount: { $sum: { $ifNull: ["$discount", 0] } },
+      cost: { $sum: { $ifNull: ["$costTotal", 0] } },
+    },
+  };
+}
+
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const [orders, products] = await Promise.all([
-      Order.find({ user: req.userId, status: "completed" }).lean(),
-      Product.find({ user: req.userId, isActive: true }).lean(),
+    const range = Object.hasOwn(RANGES, req.query.range) ? req.query.range : "7d";
+    const days = RANGES[range];
+    const userId = new mongoose.Types.ObjectId(req.accountId);
+    const now = new Date();
+
+    const rangeStart = days ? startOfDaysAgo(days, env.timezone, now) : null;
+    const todayStart = startOfDaysAgo(1, env.timezone, now);
+
+    // Chart hamesha kam az kam 7 din (aur zyada se zyada 90) dikhata hai
+    const chartDays = Math.min(Math.max(days || 30, 7), 90);
+    const chartStart = startOfDaysAgo(chartDays, env.timezone, now);
+
+    const baseMatch = { user: userId, status: "completed" };
+    const rangeMatch = rangeStart ? { ...baseMatch, createdAt: { $gte: rangeStart } } : baseMatch;
+
+    const [rangeFacet, todayAgg, dailyAgg, products] = await Promise.all([
+      Order.aggregate([
+        { $match: rangeMatch },
+        {
+          $facet: {
+            summary: [summaryStage()],
+            payments: [
+              {
+                $group: {
+                  _id: { $ifNull: ["$paymentMethod", "cash"] },
+                  orders: { $sum: 1 },
+                  revenue: { $sum: "$total" },
+                },
+              },
+              { $sort: { revenue: -1 } },
+            ],
+            top: [
+              { $unwind: "$items" },
+              {
+                $group: {
+                  _id: "$items.product",
+                  name: { $last: "$items.name" },
+                  unit: { $last: { $ifNull: ["$items.unit", "pcs"] } },
+                  qty: { $sum: "$items.qty" },
+                  sales: { $sum: { $multiply: ["$items.price", "$items.qty"] } },
+                },
+              },
+              { $sort: { sales: -1 } },
+              { $limit: 20 },
+            ],
+          },
+        },
+      ]),
+      Order.aggregate([
+        { $match: { ...baseMatch, createdAt: { $gte: todayStart } } },
+        summaryStage(),
+      ]),
+      Order.aggregate([
+        { $match: { ...baseMatch, createdAt: { $gte: chartStart } } },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: env.timezone },
+            },
+            orders: { $sum: 1 },
+            revenue: { $sum: "$total" },
+            cost: { $sum: { $ifNull: ["$costTotal", 0] } },
+          },
+        },
+      ]),
+      Product.find({ user: req.accountId, isActive: true }).lean(),
     ]);
 
-    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+    const facet = rangeFacet[0] || { summary: [], payments: [], top: [] };
+    const s = facet.summary[0] || { orders: 0, revenue: 0, discount: 0, cost: 0 };
+    const t = todayAgg[0] || { orders: 0, revenue: 0, cost: 0 };
 
-    const salesCount = new Map();
-    for (const order of orders) {
-      for (const item of order.items) {
-        salesCount.set(item.name, (salesCount.get(item.name) || 0) + item.qty);
-      }
-    }
+    const dailyMap = new Map(dailyAgg.map((row) => [row._id, row]));
+    const daily = dayKeys(chartDays, env.timezone, now).map((date) => {
+      const row = dailyMap.get(date);
+      return {
+        date,
+        orders: row?.orders || 0,
+        revenue: roundMoney(row?.revenue || 0),
+        profit: roundMoney((row?.revenue || 0) - (row?.cost || 0)),
+      };
+    });
+
+    const topProducts = facet.top.slice(0, 5).map((row) => ({
+      id: String(row._id),
+      name: row.name,
+      unit: row.unit,
+      qty: roundQty(row.qty),
+      sales: roundMoney(row.sales),
+    }));
 
     let bestSeller = null;
-    for (const [name, qty] of salesCount) {
-      if (!bestSeller || qty > bestSeller.qty) {
-        bestSeller = { name, qty };
+    for (const row of facet.top) {
+      if (!bestSeller || row.qty > bestSeller.qty) {
+        bestSeller = { name: row.name, qty: roundQty(row.qty), unit: row.unit };
       }
     }
 
-    const lowStockItems = products
-      .filter((product) => product.stock < (product.lowStockLevel ?? 5))
-      .map(serializeProduct);
+    const serialized = products.map(serializeProduct);
+    const lowStockItems = serialized.filter((p) => p.stockStatus === "low");
+    const outOfStockItems = serialized.filter((p) => p.stockStatus === "out");
+    const expiringItems = serialized.filter(
+      (p) => p.expiryStatus === "soon" || p.expiryStatus === "expired"
+    );
+
+    let stockCostValue = 0;
+    let stockRetailValue = 0;
+    for (const p of serialized) {
+      stockCostValue += p.stock * p.costPrice;
+      stockRetailValue += p.stock * p.price;
+    }
 
     res.json({
-      totalOrders: orders.length,
-      totalRevenue,
+      range,
+      timezone: env.timezone,
+      today: {
+        orders: t.orders,
+        revenue: roundMoney(t.revenue),
+        profit: roundMoney(t.revenue - t.cost),
+      },
+      summary: {
+        orders: s.orders,
+        revenue: roundMoney(s.revenue),
+        discount: roundMoney(s.discount),
+        profit: roundMoney(s.revenue - s.cost),
+        averageOrder: s.orders > 0 ? roundMoney(s.revenue / s.orders) : 0,
+      },
+      daily,
+      topProducts,
       bestSeller,
+      payments: facet.payments.map((row) => ({
+        method: row._id,
+        orders: row.orders,
+        revenue: roundMoney(row.revenue),
+      })),
+      inventory: {
+        products: serialized.length,
+        lowStockCount: lowStockItems.length,
+        outOfStockCount: outOfStockItems.length,
+        stockCostValue: roundMoney(stockCostValue),
+        stockRetailValue: roundMoney(stockRetailValue),
+        missingCostCount: serialized.filter((p) => !p.costPrice).length,
+      },
       lowStockItems,
+      outOfStockItems,
+      expiringItems,
     });
   })
 );

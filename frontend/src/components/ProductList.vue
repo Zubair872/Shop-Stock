@@ -6,10 +6,14 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  role: { type: String, default: "viewer" },
 });
 
 // emit: jab user "Add to Cart" click kare, parent ko batao "yeh product add karo"
-const emit = defineEmits(["add-to-cart", "delete-product", "update-product"]);
+const emit = defineEmits(["add-to-cart", "delete-product", "update-product", "stock-action"]);
+const canSell = computed(() => ["owner", "admin", "manager", "cashier"].includes(props.role));
+const canManage = computed(() => ["owner", "admin", "manager"].includes(props.role));
+const canDelete = computed(() => ["owner", "admin"].includes(props.role));
 
 // ===== SEARCH / FILTER state =====
 const searchQuery = ref("");      // search box ki value
@@ -34,16 +38,17 @@ const filteredProducts = computed(() => {
 });
 
 // ===== LOW STOCK threshold =====
-const LOW_STOCK_LIMIT = 5;
-
 // ===== EDIT state =====
 const editingId = ref(null);       // abhi kaunsa product edit ho raha hai (null = koi nahi)
-const editForm = reactive({ price: "", stock: "" });
+const editForm = reactive({ price: "", costPrice: "", stock: "", lowStockLevel: "", expiryDate: "" });
 
 function startEdit(product) {
   editingId.value = product.id;
   editForm.price = product.price;
+  editForm.costPrice = product.costPrice;
   editForm.stock = product.stock;
+  editForm.lowStockLevel = product.lowStockLevel;
+  editForm.expiryDate = product.expiryDate ? product.expiryDate.slice(0, 10) : "";
 }
 
 function cancelEdit() {
@@ -54,7 +59,10 @@ function saveEdit(id) {
   emit("update-product", {
     id,
     price: Number(editForm.price),
+    costPrice: editForm.costPrice === "" ? undefined : Number(editForm.costPrice),
     stock: Number(editForm.stock),
+    lowStockLevel: Number(editForm.lowStockLevel),
+    expiryDate: editForm.expiryDate || null,
   });
   editingId.value = null;
 }
@@ -65,6 +73,13 @@ function handleAdd(product) {
 
 function handleDelete(id) {
   emit("delete-product", id);
+}
+
+function handleStockAction(product, type) {
+  const label = type === "restock" ? "kitna stock add karna hai?" : "kitna stock waste hua?";
+  const quantity = window.prompt(`${product.name}: ${label} (${product.unit})`);
+  if (quantity === null || quantity.trim() === "") return;
+  emit("stock-action", { id: product.id, type, quantity: Number(quantity) });
 }
 </script>
 
@@ -92,6 +107,9 @@ function handleDelete(id) {
       <div class="card" v-for="p in filteredProducts" :key="p.id">
         <h3>{{ p.name }}</h3>
         <p class="category">{{ p.category }}</p>
+        <p class="unit">Unit: {{ p.unit }}</p>
+        <p v-if="p.expiryStatus === 'expired'" class="out">Expired</p>
+        <p v-else-if="p.expiryStatus === 'soon'" class="low">Expiry qareeb hai</p>
 
         <!-- ===== NORMAL VIEW (jab edit nahi ho raha) ===== -->
         <template v-if="editingId !== p.id">
@@ -99,17 +117,19 @@ function handleDelete(id) {
 
           <!-- v-if/v-else-if/v-else: teen halaton mein se ek dikhao -->
           <p v-if="p.stock === 0" class="out">Out of Stock</p>
-          <p v-else-if="p.stock < LOW_STOCK_LIMIT" class="low">
+          <p v-else-if="p.stock <= p.lowStockLevel" class="low">
             ⚠️ Kam Stock: {{ p.stock }}
           </p>
           <p v-else class="stock">Stock: {{ p.stock }}</p>
 
           <div class="card-actions">
-            <button :disabled="p.stock === 0" @click="handleAdd(p)">
+            <button v-if="canSell" :disabled="p.stock === 0" @click="handleAdd(p)">
               Add to Cart
             </button>
-            <button class="edit-btn" @click="startEdit(p)">✏️</button>
-            <button class="delete-btn" @click="handleDelete(p.id)">🗑</button>
+            <button v-if="canManage" class="stock-btn" @click="handleStockAction(p, 'restock')">+ Stock</button>
+            <button v-if="canManage" class="waste-btn" :disabled="p.stock === 0" @click="handleStockAction(p, 'wastage')">Waste</button>
+            <button v-if="canManage" class="edit-btn" @click="startEdit(p)">✏️</button>
+            <button v-if="canDelete" class="delete-btn" @click="handleDelete(p.id)">🗑</button>
           </div>
         </template>
 
@@ -117,8 +137,14 @@ function handleDelete(id) {
         <template v-else>
           <label>Price</label>
           <input v-model="editForm.price" type="number" />
+          <label>Cost price</label>
+          <input v-model="editForm.costPrice" type="number" min="0" />
           <label>Stock</label>
-          <input v-model="editForm.stock" type="number" />
+          <input v-model="editForm.stock" type="number" min="0" :step="['kg', 'litre'].includes(p.unit) ? '0.001' : '1'" />
+          <label>Low stock alert</label>
+          <input v-model="editForm.lowStockLevel" type="number" min="0" :step="['kg', 'litre'].includes(p.unit) ? '0.001' : '1'" />
+          <label>Expiry</label>
+          <input v-model="editForm.expiryDate" type="date" />
 
           <div class="card-actions">
             <button class="save-btn" @click="saveEdit(p.id)">Save</button>
@@ -169,6 +195,11 @@ function handleDelete(id) {
   color: #8a6d3b;
   font-size: 0.85rem;
 }
+.unit {
+  color: #777;
+  font-size: 0.8rem;
+  margin: 4px 0;
+}
 .price {
   font-weight: bold;
   font-size: 1.1rem;
@@ -206,6 +237,12 @@ function handleDelete(id) {
 }
 .edit-btn {
   flex: 0 0 40px;
+  background: #8a6d3b;
+}
+.stock-btn {
+  background: #2e7d32;
+}
+.waste-btn {
   background: #8a6d3b;
 }
 .card-actions {

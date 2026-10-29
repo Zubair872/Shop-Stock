@@ -13,13 +13,26 @@ export async function connectDB() {
   }
 
   if (!cache.promise) {
-    cache.promise = mongoose.connect(process.env.MONGO_URI);
+    cache.promise = mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 10000, // 10 second mein fail ho, 30 nahi
+    });
   }
 
   try {
     cache.conn = await cache.promise;
   } catch (error) {
     cache.promise = null;
+
+    console.error("Mongo error:", error.message);
+
+    // har shard server ka asli error
+    const servers = error.reason?.servers;
+    if (servers) {
+      for (const [host, desc] of servers) {
+        console.error(host, "=>", desc.error?.message || desc.error || "koi error nahi");
+      }
+    }
+
     throw error;
   }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { reactive } from "vue";
+import { reactive, computed } from "vue";
 
 const emit = defineEmits(["add-product"]);
 
@@ -7,8 +7,14 @@ const form = reactive({
   name: "",
   category: "",
   price: "",
+  costPrice: "",
   stock: "",
+  unit: "pcs",
+  lowStockLevel: 5,
+  expiryDate: "",
 });
+
+const stockStep = computed(() => ["kg", "litre"].includes(form.unit) ? "0.001" : "1");
 
 function handleSubmit() {
   if (!form.name.trim() || form.price === "") return;
@@ -17,13 +23,21 @@ function handleSubmit() {
     name: form.name.trim(),
     category: form.category.trim(),
     price: Number(form.price),
+    costPrice: form.costPrice === "" ? undefined : Number(form.costPrice),
     stock: Number(form.stock) || 0,
+    unit: form.unit,
+    lowStockLevel: Number(form.lowStockLevel),
+    expiryDate: form.expiryDate || null,
   });
 
   form.name = "";
   form.category = "";
   form.price = "";
+  form.costPrice = "";
   form.stock = "";
+  form.unit = "pcs";
+  form.lowStockLevel = 5;
+  form.expiryDate = "";
 }
 </script>
 
@@ -34,7 +48,19 @@ function handleSubmit() {
     <input v-model="form.name" placeholder="Product Name" required />
     <input v-model="form.category" placeholder="Category (e.g. Cake)" />
     <input v-model="form.price" type="number" min="0" placeholder="Price" required />
-    <input v-model="form.stock" type="number" min="0" placeholder="Stock" />
+    <input v-model="form.costPrice" type="number" min="0" placeholder="Cost price" />
+    <select v-model="form.unit" aria-label="Unit">
+      <option value="pcs">Pieces</option>
+      <option value="kg">Kilogram</option>
+      <option value="g">Gram</option>
+      <option value="litre">Litre</option>
+      <option value="dozen">Dozen</option>
+      <option value="packet">Packet</option>
+      <option value="box">Box</option>
+    </select>
+    <input v-model="form.stock" type="number" min="0" :step="stockStep" placeholder="Stock" />
+    <input v-model="form.lowStockLevel" type="number" min="0" :step="stockStep" placeholder="Low stock alert" />
+    <label class="date-field">Expiry <input v-model="form.expiryDate" type="date" /></label>
 
     <button type="submit">Add Product</button>
   </form>

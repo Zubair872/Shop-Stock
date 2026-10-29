@@ -1,16 +1,19 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, watch, onMounted } from "vue";
 import ProductList from "./components/ProductList.vue";
 import ProductForm from "./components/ProductForm.vue";
 import Cart from "./components/Cart.vue";
 import OrderHistory from "./components/OrderHistory.vue";
 import Dashboard from "./components/Dashboard.vue";
+import Team from "./components/Team.vue";
 import AuthForm from "./components/AuthForm.vue";
 import {
   getProducts,
   addProduct,
   updateProduct,
   deleteProduct,
+  restockProduct,
+  recordWastage,
   placeOrder,
   getMe,
   getToken,
@@ -99,6 +102,18 @@ async function handleUpdateProduct(updates) {
   }
 }
 
+async function handleStockAction({ id, type, quantity }) {
+  try {
+    const update = type === "restock"
+      ? await restockProduct(id, { quantity })
+      : await recordWastage(id, { quantity });
+    const index = products.value.findIndex((product) => product.id === id);
+    if (index !== -1) products.value[index] = update;
+  } catch (error) {
+    alert(errorMessage(error));
+  }
+}
+
 function handleAddToCart(product) {
   const existing = cart.value.find((item) => item.id === product.id);
 
@@ -115,19 +130,40 @@ function handleRemoveFromCart(id) {
   cart.value = cart.value.filter((item) => item.id !== id);
 }
 
-async function handleCheckout() {
+// Ek hi order ke retry par wahi key jati hai, taake double-click se do order na banein
+let checkoutKey = null;
+const checkingOut = ref(false);
+
+// Cart badle to purani key ka order dobara na mil jaye
+watch(cart, () => { checkoutKey = null; }, { deep: true });
+
+function newKey() {
+  return globalThis.crypto?.randomUUID?.() || `k-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function handleCheckout(details) {
+  if (checkingOut.value) return;
+  checkingOut.value = true;
+  if (!checkoutKey) checkoutKey = newKey();
+
   try {
-    await placeOrder(cart.value);
+    const items = cart.value.map((item) => ({ id: item.id, qty: item.qty }));
+    const order = await placeOrder(items, details, checkoutKey);
+    checkoutKey = null;
     cart.value = [];
     products.value = await getProducts();
-    alert("✅ Order confirm ho gaya!");
+    alert(`✅ Order confirm ho gaya! Total: Rs. ${order.total}`);
   } catch (error) {
     alert(errorMessage(error));
+    // Stock badal chuka ho sakta hai; cart badle to nayi key chahiye
+    if (error?.response) checkoutKey = null;
     try {
       products.value = await getProducts();
     } catch {
       return;
     }
+  } finally {
+    checkingOut.value = false;
   }
 }
 </script>
@@ -161,25 +197,38 @@ async function handleCheckout() {
           >
             Dashboard
           </button>
+          <button
+            v-if="['owner', 'admin'].includes(user.role)"
+            :class="{ active: activeTab === 'team' }"
+            @click="activeTab = 'team'"
+          >
+            Team
+          </button>
           <button class="logout" @click="handleLogout">Logout</button>
         </nav>
       </header>
 
       <main v-if="activeTab === 'shop'" class="layout">
         <section class="left">
-          <ProductForm @add-product="handleAddProduct" />
+          <ProductForm
+            v-if="['owner', 'admin', 'manager'].includes(user.role)"
+            @add-product="handleAddProduct"
+          />
 
           <ProductList
             :products="products"
+            :role="user.role"
             @add-to-cart="handleAddToCart"
             @delete-product="handleDeleteProduct"
             @update-product="handleUpdateProduct"
+            @stock-action="handleStockAction"
           />
         </section>
 
-        <aside class="right">
+        <aside v-if="['owner', 'admin', 'manager', 'cashier'].includes(user.role)" class="right">
           <Cart
             :cart-items="cart"
+            :busy="checkingOut"
             @checkout="handleCheckout"
             @remove-item="handleRemoveFromCart"
           />
@@ -190,8 +239,11 @@ async function handleCheckout() {
         <OrderHistory />
       </main>
 
-      <main v-else class="layout single">
+      <main v-else-if="activeTab === 'dashboard'" class="layout single">
         <Dashboard />
+      </main>
+      <main v-else class="layout single">
+        <Team :current-role="user.role" />
       </main>
     </template>
   </div>

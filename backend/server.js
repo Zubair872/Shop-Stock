@@ -1,54 +1,29 @@
 import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import { connectDB } from "./config/db.js";
-import authRoutes from "./routes/auth.js";
-import productRoutes from "./routes/products.js";
-import orderRoutes from "./routes/orders.js";
-import dashboardRoutes from "./routes/dashboard.js";
-import { notFound, errorHandler } from "./middleware/errorHandler.js";
-
-if (!process.env.JWT_SECRET) {
-  throw new Error("JWT_SECRET is missing in environment variables");
-}
-
-const app = express();
-
-const allowedOrigins = (process.env.CORS_ORIGIN || "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-app.use(cors(allowedOrigins.length > 0 ? { origin: allowedOrigins } : {}));
-app.use(express.json({ limit: "100kb" }));
-
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
-});
-
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.use("/api/auth", authRoutes);
-app.use("/api/products", productRoutes);
-app.use("/api/orders", orderRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-
-app.use(notFound);
-app.use(errorHandler);
-
-const PORT = process.env.PORT || 3001;
+import mongoose from "mongoose";
+import app from "./app.js";
+import { env } from "./config/env.js";
 
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => {
-    console.log(`Backend chal raha hai: http://localhost:${PORT}`);
+  const server = app.listen(env.port, () => {
+    console.log(`Backend chal raha hai: http://localhost:${env.port}`);
   });
+
+  // Band hone se pehle chalti requests poori hone do (deploy / docker stop par)
+  const shutdown = (signal) => {
+    console.log(`${signal} mila, band ho raha hai...`);
+    server.close(async () => {
+      await mongoose.disconnect().catch(() => {});
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
 
 export default app;

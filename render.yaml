@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: shop-stock-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ALLOW_REGISTRATION
+        value: "true"
+      - key: SHOP_TIMEZONE
+        value: Asia/Karachi
+      - key: TRUST_PROXY
+        value: "1"
+      - key: CORS_ORIGIN
+        value: https://shop-stock-web.onrender.com
+
+  - type: web
+    name: shop-stock-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://shop-stock-api.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -1,12 +1,48 @@
 <script setup>
-import { ref, onMounted } from "vue";
-import { getOrders } from "../services/api.js";
+import { ref, reactive, onMounted } from "vue";
+import { getOrders, cancelOrder, downloadReport, errorMessage } from "../services/api.js";
 
 const orders = ref([]);
+const loading = ref(true);
+const error = ref("");
+const page = ref(1);
+const pages = ref(1);
+const total = ref(0);
+const filters = reactive({ status: "all", from: "", to: "", q: "" });
 
-onMounted(async () => {
-  orders.value = await getOrders();
-});
+async function load(targetPage = 1) {
+  loading.value = true;
+  error.value = "";
+  try {
+    const data = await getOrders({ ...filters, page: targetPage, limit: 20 });
+    orders.value = data.items;
+    page.value = data.page;
+    pages.value = data.pages;
+    total.value = data.total;
+  } catch (e) {
+    error.value = errorMessage(e);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleCancel(order) {
+  if (!confirm(`Order #${shortId(order.id)} cancel karein? Stock wapas ho jayega.`)) return;
+  try {
+    await cancelOrder(order.id);
+    await load(page.value);
+  } catch (e) {
+    alert(errorMessage(e));
+  }
+}
+
+async function handleExport() {
+  try {
+    await downloadReport("orders", { from: filters.from, to: filters.to });
+  } catch (e) {
+    alert(errorMessage(e));
+  }
+}
 
 function formatDate(isoString) {
   return new Date(isoString).toLocaleString();
@@ -15,32 +51,70 @@ function formatDate(isoString) {
 function shortId(id) {
   return String(id).slice(-6).toUpperCase();
 }
+
+onMounted(() => load(1));
 </script>
 
 <template>
   <div class="order-history">
     <h2>📋 Order History</h2>
 
-    <p v-if="orders.length === 0" class="empty">Abhi tak koi order nahi hua.</p>
+    <form class="filters" @submit.prevent="load(1)">
+      <select v-model="filters.status" aria-label="Status">
+        <option value="all">Sab</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <input v-model="filters.from" type="date" aria-label="Se" />
+      <input v-model="filters.to" type="date" aria-label="Tak" />
+      <input v-model="filters.q" placeholder="Customer naam/phone" maxlength="60" />
+      <button type="submit">Dhoondhein</button>
+      <button type="button" @click="handleExport">⬇ CSV</button>
+    </form>
 
-    <div
-      class="order-card"
-      v-for="order in [...orders].reverse()"
-      :key="order.id"
-    >
-      <div class="order-header">
-        <span>Order #{{ shortId(order.id) }}</span>
-        <span>{{ formatDate(order.date) }}</span>
+    <p v-if="loading" class="empty">Loading...</p>
+    <p v-else-if="error" class="error">{{ error }} <button @click="load(page)">Dobara try</button></p>
+    <p v-else-if="orders.length === 0" class="empty">Koi order nahi mila.</p>
+
+    <template v-else>
+      <div
+        class="order-card"
+        :class="{ cancelled: order.status === 'cancelled' }"
+        v-for="order in orders"
+        :key="order.id"
+      >
+        <div class="order-header">
+          <span>Order #{{ shortId(order.id) }} · {{ order.paymentMethod }}</span>
+          <span>{{ formatDate(order.date) }}</span>
+        </div>
+
+        <p v-if="order.customerName || order.customerPhone" class="customer">
+          👤 {{ order.customerName }} {{ order.customerPhone }}
+        </p>
+
+        <ul>
+          <li v-for="item in order.items" :key="item.id">
+            {{ item.name }} x{{ item.qty }} {{ item.unit }} — Rs. {{ item.price * item.qty }}
+          </li>
+        </ul>
+
+        <div class="order-total">
+          <span v-if="order.discount > 0">Discount: Rs. {{ order.discount }} · </span>
+          Total: Rs. {{ order.total }}
+          <span v-if="order.status === 'cancelled'" class="badge">CANCELLED</span>
+        </div>
+
+        <button v-if="order.status === 'completed'" class="cancel-btn" @click="handleCancel(order)">
+          Cancel order
+        </button>
       </div>
 
-      <ul>
-        <li v-for="item in order.items" :key="item.id">
-          {{ item.name }} x{{ item.qty }} — Rs. {{ item.price * item.qty }}
-        </li>
-      </ul>
-
-      <div class="order-total">Total: Rs. {{ order.total }}</div>
-    </div>
+      <div class="pager">
+        <button :disabled="page <= 1" @click="load(page - 1)">← Pichla</button>
+        <span>Page {{ page }} / {{ pages }} ({{ total }} orders)</span>
+        <button :disabled="page >= pages" @click="load(page + 1)">Agla →</button>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -48,8 +122,23 @@ function shortId(id) {
 .order-history {
   max-width: 700px;
 }
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.filters input,
+.filters select {
+  padding: 6px 8px;
+  border: 1px solid #e0d5c8;
+  border-radius: 6px;
+}
 .empty {
   color: #999;
+}
+.error {
+  color: #b03a2e;
 }
 .order-card {
   background: #fffaf3;
@@ -58,12 +147,19 @@ function shortId(id) {
   padding: 14px;
   margin-bottom: 12px;
 }
+.order-card.cancelled {
+  opacity: 0.6;
+}
 .order-header {
   display: flex;
   justify-content: space-between;
   font-size: 0.85rem;
   color: #8a6d3b;
   margin-bottom: 8px;
+}
+.customer {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
 }
 ul {
   margin: 0;
@@ -73,5 +169,21 @@ ul {
   margin-top: 8px;
   font-weight: bold;
   text-align: right;
+}
+.badge {
+  background: #fdecea;
+  color: #b03a2e;
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  margin-left: 6px;
+}
+.cancel-btn {
+  margin-top: 6px;
+}
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

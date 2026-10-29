@@ -1,0 +1,30 @@
+# Poora system ek command se: docker compose up --build
+# Pehle .env file banayein (JWT_SECRET zaroori): JWT_SECRET=<kam az kam 32 characters>
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on: [mongo]
+    environment:
+      NODE_ENV: production
+      MONGO_URI: mongodb://mongo:27017/shop-stock
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET set karein}
+      TRUST_PROXY: "1"
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      SHOP_TIMEZONE: ${SHOP_TIMEZONE:-Asia/Karachi}
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on: [backend]
+    ports:
+      - "8080:80"
+
+volumes:
+  mongo-data:

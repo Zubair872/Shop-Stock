@@ -1,6 +1,8 @@
 import jwt from "jsonwebtoken";
+import { env } from "../config/env.js";
+import User from "../models/User.js";
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
 
@@ -9,12 +11,27 @@ export function requireAuth(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = payload.sub;
+    const payload = jwt.verify(token, env.jwtSecret, { algorithms: ["HS256"] });
+    const user = await User.findById(payload.sub).lean();
+    if (!user || user.isActive === false) {
+      return res.status(401).json({ message: "Account nahi mila ya band hai" });
+    }
+    req.userId = String(user._id);
+    req.accountId = String(user.accountId || user._id);
+    req.userRole = user.role || "owner";
     next();
   } catch {
     res
       .status(401)
       .json({ message: "Session khatam ho gaya, dobara login karein" });
   }
+}
+
+export function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!roles.includes(req.userRole)) {
+      return res.status(403).json({ message: "Is kaam ki ijazat nahi hai" });
+    }
+    next();
+  };
 }
