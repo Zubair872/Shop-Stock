@@ -1,7 +1,7 @@
 {
-  "name": "bakery-backend",
+  "name": "shop-stock-backend",
   "version": "2.0.0",
-  "description": "Bakery shop backend API",
+  "description": "Shop-Stock kiryana POS & Khata API",
   "main": "server.js",
   "type": "module",
   "engines": {

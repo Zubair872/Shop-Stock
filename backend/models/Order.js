@@ -39,8 +39,13 @@ const orderSchema = new mongoose.Schema(
     costTotal: { type: Number, default: 0, min: 0 },
     paymentMethod: {
       type: String,
-      enum: ["cash", "card", "wallet"],
+      enum: ["cash", "card", "wallet", "udhaar"],
       default: "cash",
+    },
+    customer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
     },
     customerName: { type: String, trim: true, default: "" },
     customerPhone: { type: String, trim: true, default: "" },

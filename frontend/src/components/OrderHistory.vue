@@ -1,8 +1,15 @@
 <script setup>
 import { ref, reactive, onMounted } from "vue";
+import ReceiptModal from "./ReceiptModal.vue";
 import { getOrders, cancelOrder, downloadReport, errorMessage } from "../services/api.js";
+import { t } from "../i18n.js";
+
+const props = defineProps({
+  shopName: { type: String, default: "Shop-Stock" },
+});
 
 const orders = ref([]);
+const selectedReceipt = ref(null);
 const loading = ref(true);
 const error = ref("");
 const page = ref(1);
@@ -27,7 +34,7 @@ async function load(targetPage = 1) {
 }
 
 async function handleCancel(order) {
-  if (!confirm(`Order #${shortId(order.id)} cancel karein? Stock wapas ho jayega.`)) return;
+  if (!confirm(t("confirmCancelOrder", { id: shortId(order.id) }))) return;
   try {
     await cancelOrder(order.id);
     await load(page.value);
@@ -57,24 +64,24 @@ onMounted(() => load(1));
 
 <template>
   <div class="order-history">
-    <h2>📋 Order History</h2>
+    <h2>{{ t("orderHistoryTitle") }}</h2>
 
     <form class="filters" @submit.prevent="load(1)">
       <select v-model="filters.status" aria-label="Status">
-        <option value="all">Sab</option>
-        <option value="completed">Completed</option>
-        <option value="cancelled">Cancelled</option>
+        <option value="all">{{ t("all") }}</option>
+        <option value="completed">{{ t("completed") }}</option>
+        <option value="cancelled">{{ t("cancelled") }}</option>
       </select>
-      <input v-model="filters.from" type="date" aria-label="Se" />
-      <input v-model="filters.to" type="date" aria-label="Tak" />
-      <input v-model="filters.q" placeholder="Customer naam/phone" maxlength="60" />
-      <button type="submit">Dhoondhein</button>
-      <button type="button" @click="handleExport">⬇ CSV</button>
+      <input v-model="filters.from" type="date" />
+      <input v-model="filters.to" type="date" />
+      <input v-model="filters.q" :placeholder="t('custSearch')" maxlength="60" />
+      <button type="submit">{{ t("searchBtn") }}</button>
+      <button type="button" @click="handleExport">⬇ {{ t("csvBtn") }}</button>
     </form>
 
-    <p v-if="loading" class="empty">Loading...</p>
-    <p v-else-if="error" class="error">{{ error }} <button @click="load(page)">Dobara try</button></p>
-    <p v-else-if="orders.length === 0" class="empty">Koi order nahi mila.</p>
+    <p v-if="loading" class="empty">{{ t("loading") }}</p>
+    <p v-else-if="error" class="error">{{ error }} <button @click="load(page)">{{ t("retryBtn") }}</button></p>
+    <p v-else-if="orders.length === 0" class="empty">{{ t("noOrdersFound") }}</p>
 
     <template v-else>
       <div
@@ -104,17 +111,29 @@ onMounted(() => load(1));
           <span v-if="order.status === 'cancelled'" class="badge">CANCELLED</span>
         </div>
 
-        <button v-if="order.status === 'completed'" class="cancel-btn" @click="handleCancel(order)">
-          Cancel order
-        </button>
+        <div class="order-actions">
+          <button type="button" class="receipt-btn" @click="selectedReceipt = order">
+            {{ t("receiptWaBtn") }}
+          </button>
+          <button v-if="order.status === 'completed'" class="cancel-btn" @click="handleCancel(order)">
+            {{ t("cancelOrderBtn") }}
+          </button>
+        </div>
       </div>
 
       <div class="pager">
-        <button :disabled="page <= 1" @click="load(page - 1)">← Pichla</button>
-        <span>Page {{ page }} / {{ pages }} ({{ total }} orders)</span>
-        <button :disabled="page >= pages" @click="load(page + 1)">Agla →</button>
+        <button :disabled="page <= 1" @click="load(page - 1)">← {{ t("prevPage") }}</button>
+        <span>{{ page }} / {{ pages }} ({{ total }})</span>
+        <button :disabled="page >= pages" @click="load(page + 1)">{{ t("nextPage") }} →</button>
       </div>
     </template>
+
+    <ReceiptModal
+      v-if="selectedReceipt"
+      :order="selectedReceipt"
+      :shop-name="props.shopName"
+      @close="selectedReceipt = null"
+    />
   </div>
 </template>
 
@@ -178,8 +197,29 @@ ul {
   font-size: 0.75rem;
   margin-left: 6px;
 }
+.order-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.receipt-btn {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #b5651d;
+  color: white;
+  cursor: pointer;
+}
 .cancel-btn {
-  margin-top: 6px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #b03a2e;
+  color: white;
+  cursor: pointer;
 }
 .pager {
   display: flex;

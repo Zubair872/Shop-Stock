@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import Product from "../models/Product.js";
 import Order from "../models/Order.js";
 import StockMovement from "../models/StockMovement.js";
+import Customer from "../models/Customer.js";
+import LedgerEntry from "../models/LedgerEntry.js";
 import { env } from "../config/env.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -14,6 +16,7 @@ import {
 } from "../utils/validate.js";
 import { parseQuantity, roundQty, stockAtLeast } from "../utils/units.js";
 import { computeTotals } from "../utils/pricing.js";
+import { checkCreditLimit, applyReversal } from "../utils/khata.js";
 import { parseDayBoundary } from "../utils/dates.js";
 import { serializeOrder } from "../utils/serialize.js";
 
@@ -21,7 +24,7 @@ const router = Router();
 
 router.use(requireAuth);
 
-const PAYMENT_METHODS = ["cash", "card", "wallet"];
+const PAYMENT_METHODS = ["cash", "card", "wallet", "udhaar"];
 
 // Reserve kiya hua stock wapas karo (jab sale beech mein fail ho jaye)
 async function restoreStock(userId, reserved) {
@@ -105,6 +108,13 @@ router.post(
       return res.status(400).json({ message: "Payment ka tareeqa sahi nahi hai" });
     }
 
+    const customerId = req.body.customerId ? String(req.body.customerId) : "";
+    const customerName = cleanText(req.body.customerName);
+    const customerPhone = cleanText(req.body.customerPhone, 30);
+    if (paymentMethod === "udhaar" && !mongoose.isValidObjectId(customerId)) {
+      return res.status(400).json({ message: "Udhaar sale ke liye customer select karna lazmi hai" });
+    }
+
     let discountInput = 0;
     if (req.body.discount !== undefined && req.body.discount !== "") {
       discountInput = parseNumber(req.body.discount, { max: 10_000_000 });
@@ -164,10 +174,148 @@ router.post(
       lines.push({ product, qty, price: product.price, costPrice: product.costPrice ?? 0 });
     }
 
-    // Total hamesha database ki price se, client ke bheje hue daam par kabhi nahi
     const totals = computeTotals(lines, discountInput);
     if (totals.discountTooHigh) {
       return res.status(400).json({ message: "Discount total se zyada nahi ho sakta" });
+    }
+
+    const items = lines.map((line) => ({
+      product: line.product._id,
+      name: line.product.name,
+      category: line.product.category,
+      unit: line.product.unit || "pcs",
+      price: line.price,
+      costPrice: line.costPrice,
+      qty: line.qty,
+    }));
+
+    if (paymentMethod === "udhaar") {
+      const session = await mongoose.startSession();
+      let createdOrder = null;
+      let errStatus = null;
+      let errMsg = null;
+
+      try {
+        await session.withTransaction(async () => {
+          const customer = await Customer.findOne({
+            _id: customerId,
+            user: req.accountId,
+            isActive: true,
+          }).session(session);
+
+          if (!customer) {
+            errStatus = 404;
+            errMsg = "Customer nahi mila";
+            return;
+          }
+
+          const limitCheck = checkCreditLimit(customer.balance, customer.creditLimit, totals.total);
+          if (!limitCheck.allowed) {
+            errStatus = 409;
+            errMsg = `Udhaar hadd (Rs. ${customer.creditLimit}) cross ho rahi hai. Mojooda udhaar: Rs. ${customer.balance}`;
+            return;
+          }
+
+          const txReserved = [];
+          for (const line of lines) {
+            const updated = await Product.findOneAndUpdate(
+              {
+                _id: line.product._id,
+                user: req.accountId,
+                isActive: true,
+                stock: stockAtLeast(line.qty),
+              },
+              { $inc: { stock: -line.qty } },
+              { new: true, session }
+            ).lean();
+
+            if (!updated) {
+              errStatus = 409;
+              errMsg = `${line.product.name} ka stock kaafi nahi hai`;
+              throw new Error("ABORT_TX");
+            }
+
+            txReserved.push({
+              product: line.product,
+              qty: line.qty,
+              stockAfter: roundQty(updated.stock),
+            });
+          }
+
+          customer.balance = limitCheck.nextBalance;
+          await customer.save({ session });
+
+          const [orderDoc] = await Order.create(
+            [
+              {
+                user: req.accountId,
+                items,
+                subtotal: totals.subtotal,
+                discount: totals.discount,
+                total: totals.total,
+                costTotal: totals.costTotal,
+                paymentMethod: "udhaar",
+                customer: customer._id,
+                customerName: customer.name,
+                customerPhone: customer.phone,
+                note: cleanText(req.body.note, 200),
+                ...(idempotencyKey ? { idempotencyKey } : {}),
+              },
+            ],
+            { session }
+          );
+
+          await LedgerEntry.create(
+            [
+              {
+                user: req.accountId,
+                customer: customer._id,
+                type: "udhaar_sale",
+                amount: totals.total,
+                delta: totals.total,
+                balanceAfter: customer.balance,
+                order: orderDoc._id,
+                note: `Order #${String(orderDoc._id).slice(-6).toUpperCase()}`,
+                createdBy: req.userId,
+              },
+            ],
+            { session }
+          );
+
+          await StockMovement.insertMany(
+            txReserved.map((entry) => ({
+              user: req.accountId,
+              product: entry.product._id,
+              type: "sale",
+              quantity: -entry.qty,
+              stockAfter: entry.stockAfter,
+              order: orderDoc._id,
+            })),
+            { session }
+          );
+
+          createdOrder = orderDoc;
+        });
+      } catch (error) {
+        if (error.message !== "ABORT_TX") {
+          if (error.code === 11000 && idempotencyKey) {
+            const previous = await Order.findOne({ user: req.accountId, idempotencyKey }).lean();
+            if (previous) {
+              res.setHeader("Idempotent-Replay", "true");
+              return res.status(200).json(serializeOrder(previous));
+            }
+          }
+          throw error;
+        }
+      } finally {
+        await session.endSession();
+      }
+
+      if (errStatus) {
+        return res.status(errStatus).json({ message: errMsg });
+      }
+
+      return res.status(201).json(serializeOrder(createdOrder));
     }
 
     // Stock reserve: har product par ek atomic "agar stock kaafi hai to ghatao"
@@ -201,16 +349,6 @@ router.post(
         .json({ message: `${shortName} ka stock kaafi nahi hai` });
     }
 
-    const items = lines.map((line) => ({
-      product: line.product._id,
-      name: line.product.name,
-      category: line.product.category,
-      unit: line.product.unit || "pcs",
-      price: line.price,
-      costPrice: line.costPrice,
-      qty: line.qty,
-    }));
-
     let order;
 
     try {
@@ -222,8 +360,8 @@ router.post(
         total: totals.total,
         costTotal: totals.costTotal,
         paymentMethod,
-        customerName: cleanText(req.body.customerName),
-        customerPhone: cleanText(req.body.customerPhone, 30),
+        customerName,
+        customerPhone,
         note: cleanText(req.body.note, 200),
         ...(idempotencyKey ? { idempotencyKey } : {}),
       });
@@ -272,23 +410,122 @@ router.post(
       return res.status(400).json({ message: "Order ki id sahi nahi hai" });
     }
 
+    const reason = cleanText(req.body.reason, 200);
+    const existingOrder = await Order.findOne({
+      _id: req.params.id,
+      user: req.accountId,
+    }).lean();
+
+    if (!existingOrder) {
+      return res.status(404).json({ message: "Order nahi mila" });
+    }
+    if (existingOrder.status !== "completed") {
+      return res.status(409).json({ message: "Yeh order pehle hi cancel ho chuka hai" });
+    }
+
+    if (existingOrder.paymentMethod === "udhaar" && existingOrder.customer) {
+      const session = await mongoose.startSession();
+      let cancelledOrder = null;
+      let errStatus = null;
+      let errMsg = null;
+
+      try {
+        await session.withTransaction(async () => {
+          const updatedOrder = await Order.findOneAndUpdate(
+            { _id: req.params.id, user: req.accountId, status: "completed" },
+            {
+              $set: {
+                status: "cancelled",
+                cancelledAt: new Date(),
+                cancelReason: reason,
+              },
+            },
+            { new: true, session }
+          ).lean();
+
+          if (!updatedOrder) {
+            errStatus = 409;
+            errMsg = "Yeh order pehle hi cancel ho chuka hai";
+            return;
+          }
+
+          const movements = [];
+          for (const item of updatedOrder.items) {
+            const product = await Product.findOneAndUpdate(
+              { _id: item.product, user: req.accountId },
+              { $inc: { stock: item.qty } },
+              { new: true, session }
+            ).lean();
+            if (!product) continue;
+            movements.push({
+              user: req.accountId,
+              product: item.product,
+              type: "return",
+              quantity: item.qty,
+              stockAfter: roundQty(product.stock),
+              note: "Order cancel",
+              order: updatedOrder._id,
+            });
+          }
+
+          if (movements.length > 0) {
+            await StockMovement.insertMany(movements, { session });
+          }
+
+          const customer = await Customer.findOne({
+            _id: updatedOrder.customer,
+            user: req.accountId,
+          }).session(session);
+
+          if (customer) {
+            const reverseAmount = updatedOrder.total;
+            customer.balance = applyReversal(customer.balance, -reverseAmount);
+            await customer.save({ session });
+
+            await LedgerEntry.create(
+              [
+                {
+                  user: req.accountId,
+                  customer: customer._id,
+                  type: "reversal",
+                  amount: reverseAmount,
+                  delta: -reverseAmount,
+                  balanceAfter: customer.balance,
+                  order: updatedOrder._id,
+                  note: `Order #${String(updatedOrder._id).slice(-6).toUpperCase()} cancel`,
+                  createdBy: req.userId,
+                },
+              ],
+              { session }
+            );
+          }
+
+          cancelledOrder = updatedOrder;
+        });
+      } finally {
+        await session.endSession();
+      }
+
+      if (errStatus) {
+        return res.status(errStatus).json({ message: errMsg });
+      }
+      return res.json(serializeOrder(cancelledOrder));
+    }
+
     const order = await Order.findOneAndUpdate(
       { _id: req.params.id, user: req.accountId, status: "completed" },
       {
         $set: {
           status: "cancelled",
           cancelledAt: new Date(),
-          cancelReason: cleanText(req.body.reason, 200),
+          cancelReason: reason,
         },
       },
       { new: true }
     ).lean();
 
     if (!order) {
-      const exists = await Order.exists({ _id: req.params.id, user: req.accountId });
-      return exists
-        ? res.status(409).json({ message: "Yeh order pehle hi cancel ho chuka hai" })
-        : res.status(404).json({ message: "Order nahi mila" });
+      return res.status(409).json({ message: "Yeh order pehle hi cancel ho chuka hai" });
     }
 
     const movements = [];

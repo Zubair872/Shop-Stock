@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, reactive, ref } from "vue";
+import { t } from "../i18n.js";
 import {
   createTeamMember,
   getTeamMembers,
@@ -7,7 +8,10 @@ import {
   errorMessage,
 } from "../services/api.js";
 
-const props = defineProps({ currentRole: { type: String, required: true } });
+const props = defineProps({
+  currentRole: { type: String, required: true },
+  isDemo: { type: Boolean, default: false },
+});
 const members = ref([]);
 const error = ref("");
 const loading = ref(true);
@@ -70,21 +74,23 @@ onMounted(load);
 
 <template>
   <section class="team">
-    <h2>Team access</h2>
-    <p class="muted">Manage staff roles and access to this business account.</p>
+    <h2>{{ t("teamTitle") }}</h2>
+    <p class="muted">{{ t("teamSub") }}</p>
 
-    <form class="team-form" @submit.prevent="addMember">
-      <input v-model="form.name" placeholder="Name" required maxlength="100" />
-      <input v-model="form.email" type="email" placeholder="Email" required maxlength="200" />
-      <input v-model="form.password" type="password" placeholder="Temporary password" required minlength="8" />
+    <p v-if="isDemo" class="error">{{ t("demoTeamBlocked") }}</p>
+
+    <form v-else class="team-form" @submit.prevent="addMember">
+      <input v-model="form.name" :placeholder="t('namePlaceholder')" required maxlength="100" />
+      <input v-model="form.email" type="email" :placeholder="t('authEmail')" required maxlength="200" />
+      <input v-model="form.password" type="password" :placeholder="t('tempPassPlaceholder')" required minlength="8" />
       <select v-model="form.role">
         <option v-for="role in roles" :key="role" :value="role">{{ role }}</option>
       </select>
-      <button :disabled="saving">{{ saving ? "Adding..." : "Add member" }}</button>
+      <button :disabled="saving">{{ saving ? t("addingBtn") : t("addMemberBtn") }}</button>
     </form>
 
     <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="loading" class="muted">Loading...</p>
+    <p v-if="loading" class="muted">{{ t("loading") }}</p>
     <div v-else class="members">
       <div v-for="member in members" :key="member.id" class="member">
         <div>
@@ -100,7 +106,7 @@ onMounted(load);
         </select>
         <span v-else class="badge">owner</span>
         <button v-if="member.role !== 'owner'" class="secondary" @click="toggleMember(member)">
-          {{ member.isActive ? "Disable" : "Enable" }}
+          {{ member.isActive ? t("disableBtn") : t("enableBtn") }}
         </button>
       </div>
     </div>

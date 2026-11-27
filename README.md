@@ -15,7 +15,7 @@ Tests: `cd backend && npm test`
 1. Create a free MongoDB Atlas cluster and database user. Allow the Render outbound IP range
    (or `0.0.0.0/0` with a strong database password), then copy the connection string.
 2. Push this repository to GitHub.
-3. In Render, choose **New → Blueprint**, select this repository, and apply `render.yaml`.
+3. In Render, create a **Web Service** for `backend/` (`npm start`) and a **Static Site** for `frontend/` (`npm run build`, publish `dist`), or deploy using `docker-compose.yml`.
 4. Open the `shop-stock-api` service environment settings and set `MONGO_URI` to the Atlas
    connection string. Render generates `JWT_SECRET` automatically.
 5. After deployment, open `https://shop-stock-web.onrender.com`. Free Render services may sleep

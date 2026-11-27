@@ -1,19 +1,28 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { getDashboard, downloadReport, errorMessage } from "../services/api.js";
+import { t } from "../i18n.js";
+
+async function exportOrders() {
+  try {
+    await downloadReport("orders");
+  } catch (e) {
+    alert(errorMessage(e));
+  }
+}
 
 const stats = ref(null);
 const loading = ref(true);
 const error = ref("");
 const range = ref("7d");
 
-const ranges = [
-  { value: "today", label: "Aaj" },
-  { value: "7d", label: "7 din" },
-  { value: "30d", label: "30 din" },
-  { value: "90d", label: "90 din" },
-  { value: "all", label: "Sab" },
-];
+const ranges = computed(() => [
+  { value: "today", label: t("rangeToday") },
+  { value: "7d", label: t("range7d") },
+  { value: "30d", label: t("range30d") },
+  { value: "90d", label: t("range90d") },
+  { value: "all", label: t("rangeAll") },
+]);
 
 const maxRevenue = computed(() =>
   Math.max(1, ...(stats.value?.daily || []).map((d) => d.revenue))
@@ -51,7 +60,7 @@ onMounted(load);
 
 <template>
   <div class="dashboard">
-    <h2>📊 Sales Dashboard</h2>
+    <h2>{{ t("dashboardTitle") }}</h2>
 
     <div class="ranges">
       <button
@@ -62,19 +71,22 @@ onMounted(load);
       >
         {{ r.label }}
       </button>
-      <button @click="exportProducts">⬇ Stock CSV</button>
+      <button @click="exportProducts">⬇ {{ t("stockCsv") }}</button>
+      <button @click="exportOrders">⬇ {{ t("ordersCsv") }}</button>
     </div>
 
-    <p v-if="error" class="error">{{ error }} <button @click="load">Dobara try</button></p>
-    <p v-else-if="loading && !stats">Loading...</p>
+    <p v-if="error" class="error">{{ error }} <button @click="load">{{ t("retryBtn") }}</button></p>
+    <p v-else-if="loading && !stats">{{ t("loading") }}</p>
 
     <template v-if="stats">
       <div class="stat-grid">
-        <div class="stat-card"><p class="label">Aaj ki sale</p><p class="value">{{ money(stats.today.revenue) }}</p><p class="sub">{{ stats.today.orders }} orders</p></div>
-        <div class="stat-card"><p class="label">Revenue</p><p class="value">{{ money(stats.summary.revenue) }}</p><p class="sub">{{ stats.summary.orders }} orders</p></div>
-        <div class="stat-card"><p class="label">Munafa (profit)</p><p class="value">{{ money(stats.summary.profit) }}</p><p class="sub">Average order {{ money(stats.summary.averageOrder) }}</p></div>
+        <div class="stat-card"><p class="label">{{ t("todaySale") }}</p><p class="value">{{ money(stats.today.revenue) }}</p><p class="sub">{{ stats.today.orders }} {{ t("ordersCol") }}</p></div>
+        <div class="stat-card"><p class="label">{{ t("revenue") }}</p><p class="value">{{ money(stats.summary.revenue) }}</p><p class="sub">{{ stats.summary.orders }} {{ t("ordersCol") }}</p></div>
+        <div class="stat-card"><p class="label">{{ t("grossProfit") }}</p><p class="value">{{ money(stats.summary.profit) }}</p><p class="sub">{{ t("avgOrder") }} {{ money(stats.summary.averageOrder) }}</p></div>
+        <div class="stat-card"><p class="label">{{ t("expensesLabel") }}</p><p class="value">{{ money(stats.summary.expenses) }}</p><p class="sub">{{ t("todayShort") }}: {{ money(stats.today.expenses) }}</p></div>
+        <div class="stat-card"><p class="label">{{ t("netProfit") }}</p><p class="value">{{ money(stats.summary.netProfit) }}</p><p class="sub">{{ t("todayShort") }}: {{ money(stats.today.netProfit) }}</p></div>
         <div class="stat-card">
-          <p class="label">Best Seller</p>
+          <p class="label">{{ t("bestSeller") }}</p>
           <p class="value" v-if="stats.bestSeller">{{ stats.bestSeller.name }}</p>
           <p class="value" v-else>N/A</p>
           <p class="sub" v-if="stats.bestSeller">{{ stats.bestSeller.qty }} {{ stats.bestSeller.unit }}</p>
@@ -82,10 +94,10 @@ onMounted(load);
       </div>
 
       <p v-if="stats.inventory.missingCostCount > 0" class="note">
-        ℹ️ {{ stats.inventory.missingCostCount }} products ki cost price nahi hai, isliye un ka munafa asal se zyada dikhega.
+        {{ t("missingCostNote", { count: stats.inventory.missingCostCount }) }}
       </p>
 
-      <h3>Roz ki sale</h3>
+      <h3>{{ t("dailySaleChart") }}</h3>
       <div class="chart" role="img" aria-label="Daily revenue chart">
         <div v-for="d in stats.daily" :key="d.date" class="bar-wrap" :title="`${d.date}: ${money(d.revenue)} (${d.orders} orders)`">
           <div class="bar" :style="{ height: (d.revenue / maxRevenue) * 100 + '%' }"></div>
@@ -95,37 +107,37 @@ onMounted(load);
 
       <div class="two-col">
         <div>
-          <h3>Top products</h3>
-          <p v-if="stats.topProducts.length === 0" class="sub">Abhi koi sale nahi.</p>
+          <h3>{{ t("topProducts") }}</h3>
+          <p v-if="stats.topProducts.length === 0" class="sub">{{ t("noSaleYet") }}</p>
           <ol>
             <li v-for="p in stats.topProducts" :key="p.id">{{ p.name }} — {{ p.qty }} {{ p.unit }} ({{ money(p.sales) }})</li>
           </ol>
         </div>
         <div>
-          <h3>Payment ka tareeqa</h3>
+          <h3>{{ t("paymentMethods") }}</h3>
           <ul>
-            <li v-for="p in stats.payments" :key="p.method">{{ p.method }} — {{ p.orders }} orders ({{ money(p.revenue) }})</li>
+            <li v-for="p in stats.payments" :key="p.method">{{ p.method }} — {{ p.orders }} ({{ money(p.revenue) }})</li>
           </ul>
-          <h3>Stock ki value</h3>
-          <p class="sub">Cost: {{ money(stats.inventory.stockCostValue) }}<br />Bechne par: {{ money(stats.inventory.stockRetailValue) }}</p>
+          <h3>{{ t("stockValue") }}</h3>
+          <p class="sub">{{ t("costLabel") }}: {{ money(stats.inventory.stockCostValue) }}<br />{{ t("retailLabel") }}: {{ money(stats.inventory.stockRetailValue) }}</p>
         </div>
       </div>
 
       <div v-if="stats.outOfStockItems.length > 0" class="alert-box">
-        <h3>⛔ Khatam ho chuka</h3>
+        <h3>{{ t("outOfStockTitle") }}</h3>
         <ul><li v-for="i in stats.outOfStockItems" :key="i.id">{{ i.name }}</li></ul>
       </div>
 
       <div v-if="stats.lowStockItems.length > 0" class="alert-box">
-        <h3>⚠️ Kam Stock</h3>
-        <ul><li v-for="i in stats.lowStockItems" :key="i.id">{{ i.name }} — sirf {{ i.stock }} {{ i.unit }} bache hain</li></ul>
+        <h3>{{ t("lowStockTitle") }}</h3>
+        <ul><li v-for="i in stats.lowStockItems" :key="i.id">{{ i.name }} — {{ t("onlyLeft", { qty: i.stock, unit: i.unit }) }}</li></ul>
       </div>
 
       <div v-if="stats.expiringItems.length > 0" class="alert-box">
-        <h3>📅 Expiry</h3>
+        <h3>{{ t("expiryTitle") }}</h3>
         <ul>
           <li v-for="i in stats.expiringItems" :key="i.id">
-            {{ i.name }} — {{ i.expiryStatus === "expired" ? "expire ho gaya" : "jaldi expire hoga" }}
+            {{ i.name }} — {{ i.expiryStatus === "expired" ? t("expiredWord") : t("expiringSoonWord") }}
           </li>
         </ul>
       </div>

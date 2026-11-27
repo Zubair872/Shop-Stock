@@ -8,6 +8,8 @@ import { createRateLimiter } from "../middleware/rateLimit.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { cleanText, isPasswordLengthOk } from "../utils/validate.js";
 import { serializeUser } from "../utils/serialize.js";
+import { cleanupExpiredDemos, createDemoShop } from "../utils/demoSeed.js";
+import { evaluateAccountAccess } from "../utils/subscription.js";
 import mongoose from "mongoose";
 
 const router = Router();
@@ -37,6 +39,12 @@ const registerLimiter = createRateLimiter({
   message: "Is hafte bohat accounts ban chuke hain, baad mein koshish karein",
 });
 
+const demoLimiter = createRateLimiter({
+  windowMs: 60 * 60 * 1000,
+  max: 15,
+  message: "Bohat zyada demo requests, thori der baad dobara koshish karein",
+});
+
 function signToken(userId) {
   return jwt.sign({}, env.jwtSecret, {
     subject: String(userId),
@@ -49,6 +57,19 @@ function signToken(userId) {
 router.get("/config", (req, res) => {
   res.json({ registrationOpen: env.allowRegistration });
 });
+
+router.post(
+  "/demo",
+  demoLimiter,
+  asyncHandler(async (req, res) => {
+    await cleanupExpiredDemos().catch(() => {});
+    const user = await createDemoShop();
+    res.status(201).json({
+      token: signToken(user._id),
+      user: serializeUser(user),
+    });
+  })
+);
 
 router.post(
   "/register",
@@ -82,7 +103,19 @@ router.post(
         .json({ message: "Is email se account pehle se bana hua hai" });
     }
 
-    const user = await User.create({ name, email, password, shopName, role: "owner" });
+    const trialEndsAt = new Date(Date.now() + env.trialDays * 24 * 60 * 60 * 1000);
+    const user = await User.create({
+      name,
+      email,
+      password,
+      shopName,
+      role: "owner",
+      plan: "trial",
+      status: "active",
+      trialEndsAt,
+      expiresAt: trialEndsAt,
+      lastLoginAt: new Date(),
+    });
     if (!user.accountId) {
       user.accountId = user._id;
       await user.save();
@@ -112,6 +145,27 @@ router.post(
       return res.status(401).json({ message: "Email ya password ghalat hai" });
     }
 
+    if (user.isActive === false) {
+      return res.status(403).json({ message: "Account band hai" });
+    }
+
+    if (user.role !== "superadmin" && !user.isDemo) {
+      const accountId = String(user.accountId || user._id);
+      const owner =
+        accountId === String(user._id)
+          ? user
+          : await User.findById(accountId).lean();
+      const access = evaluateAccountAccess(owner, new Date(), env.supportWhatsapp);
+      if (!access.allowed) {
+        return res.status(access.status || 403).json({
+          message: access.message,
+          code: access.code,
+        });
+      }
+    }
+
+    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
+
     res.json({
       token: signToken(user._id),
       user: serializeUser(user),
@@ -139,6 +193,9 @@ router.post(
   requireAuth,
   requireRole("owner", "admin"),
   asyncHandler(async (req, res) => {
+    if (req.isDemo) {
+      return res.status(403).json({ message: "Demo account mein team member nahi bana sakte" });
+    }
     if (!["owner", "admin"].includes(req.userRole)) {
       return res.status(403).json({ message: "Team members banane ki ijazat nahi hai" });
     }
@@ -178,6 +235,9 @@ router.patch(
   requireAuth,
   requireRole("owner", "admin"),
   asyncHandler(async (req, res) => {
+    if (req.isDemo) {
+      return res.status(403).json({ message: "Demo account mein team member nahi badal sakte" });
+    }
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(400).json({ message: "Team member ki id sahi nahi hai" });
     }
@@ -244,6 +304,9 @@ router.post(
   requireAuth,
   loginLimiter,
   asyncHandler(async (req, res) => {
+    if (req.isDemo) {
+      return res.status(403).json({ message: "Demo account mein password nahi badal sakte" });
+    }
     const currentPassword =
       typeof req.body.currentPassword === "string" ? req.body.currentPassword : "";
     const newPassword = typeof req.body.newPassword === "string" ? req.body.newPassword : "";

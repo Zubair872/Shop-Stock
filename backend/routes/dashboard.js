@@ -2,12 +2,13 @@ import { Router } from "express";
 import mongoose from "mongoose";
 import Product from "../models/Product.js";
 import Order from "../models/Order.js";
+import Expense from "../models/Expense.js";
 import { env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { roundMoney } from "../utils/validate.js";
 import { roundQty } from "../utils/units.js";
-import { startOfDaysAgo, dayKeys } from "../utils/dates.js";
+import { startOfDaysAgo, dayKeys, localDateKey } from "../utils/dates.js";
 import { serializeProduct } from "../utils/serialize.js";
 
 const router = Router();
@@ -45,8 +46,13 @@ router.get(
 
     const baseMatch = { user: userId, status: "completed" };
     const rangeMatch = rangeStart ? { ...baseMatch, createdAt: { $gte: rangeStart } } : baseMatch;
+    const todayKey = localDateKey(now, env.timezone);
+    const rangeStartKey = rangeStart ? localDateKey(rangeStart, env.timezone) : null;
+    const expenseRangeMatch = rangeStartKey
+      ? { user: userId, dateKey: { $gte: rangeStartKey } }
+      : { user: userId };
 
-    const [rangeFacet, todayAgg, dailyAgg, products] = await Promise.all([
+    const [rangeFacet, todayAgg, dailyAgg, products, rangeExpenseAgg, todayExpenseAgg] = await Promise.all([
       Order.aggregate([
         { $match: rangeMatch },
         {
@@ -97,11 +103,21 @@ router.get(
         },
       ]),
       Product.find({ user: req.accountId, isActive: true }).lean(),
+      Expense.aggregate([
+        { $match: expenseRangeMatch },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+      Expense.aggregate([
+        { $match: { user: userId, dateKey: todayKey } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
     ]);
 
     const facet = rangeFacet[0] || { summary: [], payments: [], top: [] };
     const s = facet.summary[0] || { orders: 0, revenue: 0, discount: 0, cost: 0 };
     const t = todayAgg[0] || { orders: 0, revenue: 0, cost: 0 };
+    const rangeExpenses = roundMoney(rangeExpenseAgg[0]?.total || 0);
+    const todayExpenses = roundMoney(todayExpenseAgg[0]?.total || 0);
 
     const dailyMap = new Map(dailyAgg.map((row) => [row._id, row]));
     const daily = dayKeys(chartDays, env.timezone, now).map((date) => {
@@ -150,12 +166,16 @@ router.get(
         orders: t.orders,
         revenue: roundMoney(t.revenue),
         profit: roundMoney(t.revenue - t.cost),
+        expenses: todayExpenses,
+        netProfit: roundMoney(t.revenue - t.cost - todayExpenses),
       },
       summary: {
         orders: s.orders,
         revenue: roundMoney(s.revenue),
         discount: roundMoney(s.discount),
         profit: roundMoney(s.revenue - s.cost),
+        expenses: rangeExpenses,
+        netProfit: roundMoney(s.revenue - s.cost - rangeExpenses),
         averageOrder: s.orders > 0 ? roundMoney(s.revenue / s.orders) : 0,
       },
       daily,

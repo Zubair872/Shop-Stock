@@ -78,6 +78,11 @@ export async function loginUser(details) {
   return res.data;
 }
 
+export async function startDemoSession() {
+  const res = await api.post("/auth/demo");
+  return res.data;
+}
+
 export async function getMe() {
   const res = await api.get("/auth/me");
   return res.data;
@@ -169,6 +174,121 @@ export async function createTeamMember(details) {
 
 export async function updateTeamMember(id, updates) {
   const res = await api.patch(`/auth/team/${id}`, updates);
+  return res.data;
+}
+
+export async function getCustomers(params = {}) {
+  const res = await api.get("/customers", { params });
+  return res.data;
+}
+
+export async function createCustomer(details) {
+  const res = await api.post("/customers", details);
+  return res.data;
+}
+
+export async function updateCustomer(id, updates) {
+  const res = await api.put(`/customers/${id}`, updates);
+  return res.data;
+}
+
+export async function getCustomerLedger(id) {
+  const res = await api.get(`/customers/${id}/ledger`);
+  return res.data;
+}
+
+export async function recordCustomerPayment(id, payload) {
+  const res = await api.post(`/customers/${id}/payments`, payload);
+  return res.data;
+}
+
+export async function reverseLedgerEntry(customerId, entryId, note = "") {
+  const res = await api.post(`/customers/${customerId}/ledger/${entryId}/reverse`, { note });
+  return res.data;
+}
+
+export async function getDailyClosing(date = "") {
+  const res = await api.get("/closing", date ? { params: { date } } : undefined);
+  return res.data;
+}
+
+export async function saveDailyClosing(payload) {
+  const res = await api.post("/closing", payload);
+  return res.data;
+}
+
+export async function getClosingHistory(limit = 30) {
+  const res = await api.get("/closing/history", { params: { limit } });
+  return res.data;
+}
+
+export async function getSuppliers(params = {}) {
+  const res = await api.get("/suppliers", { params });
+  return res.data;
+}
+
+export async function createSupplier(details) {
+  const res = await api.post("/suppliers", details);
+  return res.data;
+}
+
+export async function updateSupplier(id, updates) {
+  const res = await api.put(`/suppliers/${id}`, updates);
+  return res.data;
+}
+
+export async function getSupplierLedger(id) {
+  const res = await api.get(`/suppliers/${id}/ledger`);
+  return res.data;
+}
+
+export async function paySupplier(id, payload) {
+  const res = await api.post(`/suppliers/${id}/payments`, payload);
+  return res.data;
+}
+
+export async function getPurchases(params = {}) {
+  const res = await api.get("/purchases", { params });
+  return res.data;
+}
+
+export async function createPurchase(payload) {
+  const res = await api.post("/purchases", payload);
+  return res.data;
+}
+
+export async function getExpenses(params = {}) {
+  const res = await api.get("/expenses", { params });
+  return res.data;
+}
+
+export async function createExpense(payload) {
+  const res = await api.post("/expenses", payload);
+  return res.data;
+}
+
+export async function deleteExpense(id) {
+  const res = await api.delete(`/expenses/${id}`);
+  return res.data;
+}
+
+export async function getAdminShops(params = {}) {
+  const res = await api.get("/admin/shops", { params });
+  return res.data;
+}
+
+export async function createAdminShop(payload) {
+  const res = await api.post("/admin/shops", payload);
+  return res.data;
+}
+
+export async function updateAdminShop(id, payload) {
+  const res = await api.patch(`/admin/shops/${id}`, payload);
+  return res.data;
+}
+
+export async function getAdminLogs() {
+  const res = await api.get("/admin/logs");
   return res.data;
 }
 

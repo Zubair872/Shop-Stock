@@ -38,6 +38,11 @@ export const env = {
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   bcryptRounds: clampInt(process.env.BCRYPT_ROUNDS, 10, 8, 14),
   expiryWarningDays: clampInt(process.env.EXPIRY_WARNING_DAYS, 3, 1, 60),
+  trialDays: clampInt(process.env.TRIAL_DAYS, 7, 1, 365),
+  supportWhatsapp: String(process.env.SUPPORT_WHATSAPP || "").trim(),
+  superadminEmail: String(process.env.SUPERADMIN_EMAIL || "").trim().toLowerCase(),
+  superadminPassword: String(process.env.SUPERADMIN_PASSWORD || ""),
+  superadminName: String(process.env.SUPERADMIN_NAME || "Super Admin").trim(),
 };
 
 export function assertEnv() {

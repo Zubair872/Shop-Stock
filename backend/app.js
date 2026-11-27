@@ -10,6 +10,13 @@ import productRoutes from "./routes/products.js";
 import orderRoutes from "./routes/orders.js";
 import dashboardRoutes from "./routes/dashboard.js";
 import reportRoutes from "./routes/reports.js";
+import customerRoutes from "./routes/customers.js";
+import closingRoutes from "./routes/closing.js";
+import supplierRoutes from "./routes/suppliers.js";
+import purchaseRoutes from "./routes/purchases.js";
+import expenseRoutes from "./routes/expenses.js";
+import adminRoutes from "./routes/admin.js";
+import { ensureSuperadminFromEnv } from "./utils/superadminBootstrap.js";
 import { notFound, errorHandler } from "./middleware/errorHandler.js";
 
 assertEnv();
@@ -56,9 +63,15 @@ app.use(
   })
 );
 
+let superadminEnsured = false;
+
 app.use(async (req, res, next) => {
   try {
     await connectDB();
+    if (!superadminEnsured && !env.isTest) {
+      superadminEnsured = true;
+      await ensureSuperadminFromEnv().catch(() => {});
+    }
     next();
   } catch (error) {
     next(error);
@@ -70,6 +83,12 @@ app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/customers", customerRoutes);
+app.use("/api/closing", closingRoutes);
+app.use("/api/suppliers", supplierRoutes);
+app.use("/api/purchases", purchaseRoutes);
+app.use("/api/expenses", expenseRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

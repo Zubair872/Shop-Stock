@@ -100,6 +100,10 @@ function readFields(body, { partial, current }) {
     }
   }
 
+  if (body.barcode !== undefined) {
+    data.barcode = cleanText(body.barcode, 60);
+  }
+
   return { data, errors };
 }
 
@@ -116,6 +120,13 @@ function nameTaken(userId, name, exceptId) {
   const filter = { user: userId, isActive: true, name };
   if (exceptId) filter._id = { $ne: exceptId };
   return Product.exists(filter).collation({ locale: "en", strength: 2 });
+}
+
+function barcodeTaken(userId, barcode, exceptId) {
+  if (!barcode) return Promise.resolve(false);
+  const filter = { user: userId, isActive: true, barcode };
+  if (exceptId) filter._id = { $ne: exceptId };
+  return Product.exists(filter);
 }
 
 router.get(
@@ -141,6 +152,10 @@ router.post(
 
     if (await nameTaken(req.accountId, data.name)) {
       return res.status(409).json({ message: "Is naam ka product pehle se maujood hai" });
+    }
+
+    if (await barcodeTaken(req.accountId, data.barcode)) {
+      return res.status(409).json({ message: "Yeh barcode kisi aur product par laga hai" });
     }
 
     const product = await Product.create({ ...data, user: req.accountId });
@@ -192,6 +207,10 @@ router.put(
 
     if (data.name && (await nameTaken(req.accountId, data.name, existing._id))) {
       return res.status(409).json({ message: "Is naam ka product pehle se maujood hai" });
+    }
+
+    if (data.barcode && (await barcodeTaken(req.accountId, data.barcode, existing._id))) {
+      return res.status(409).json({ message: "Yeh barcode kisi aur product par laga hai" });
     }
 
     // Optimistic concurrency: sirf tab update jab stock abhi bhi wahi ho jo humne parha tha

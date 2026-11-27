@@ -21,6 +21,7 @@ const productSchema = new mongoose.Schema(
       default: "pcs",
     },
     expiryDate: { type: Date },
+    barcode: { type: String, trim: true, default: "" },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -28,5 +29,6 @@ const productSchema = new mongoose.Schema(
 
 productSchema.index({ user: 1, name: 1 });
 productSchema.index({ user: 1, category: 1 });
+productSchema.index({ user: 1, barcode: 1 });
 
 export default mongoose.models.Product || mongoose.model("Product", productSchema);

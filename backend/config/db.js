@@ -1,7 +1,14 @@
+import dns from "node:dns";
 import mongoose from "mongoose";
 
 const cache = globalThis.mongooseCache || { conn: null, promise: null };
 globalThis.mongooseCache = cache;
+
+async function openConnection() {
+  return mongoose.connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 10000,
+  });
+}
 
 export async function connectDB() {
   if (cache.conn) {
@@ -13,8 +20,12 @@ export async function connectDB() {
   }
 
   if (!cache.promise) {
-    cache.promise = mongoose.connect(process.env.MONGO_URI, {
-      serverSelectionTimeoutMS: 10000, // 10 second mein fail ho, 30 nahi
+    cache.promise = openConnection().catch(async (error) => {
+      if (String(error?.message || "").includes("querySrv")) {
+        dns.setServers(["8.8.8.8", "1.1.1.1"]);
+        return openConnection();
+      }
+      throw error;
     });
   }
 

@@ -1,12 +1,25 @@
 <script setup>
-import { ref, reactive, computed } from "vue";
+import { ref, reactive, computed, watch } from "vue";
 import { loginUser, registerUser, errorMessage } from "../services/api.js";
+import LangSwitcher from "./LangSwitcher.vue";
+import { t } from "../i18n.js";
 
-const emit = defineEmits(["authenticated"]);
+const props = defineProps({
+  initialMode: { type: String, default: "login" },
+});
 
-const mode = ref("login");
+const emit = defineEmits(["authenticated", "start-demo"]);
+
+const mode = ref(props.initialMode);
 const loading = ref(false);
 const error = ref("");
+
+watch(
+  () => props.initialMode,
+  (val) => {
+    mode.value = val;
+  }
+);
 
 const form = reactive({
   name: "",
@@ -43,24 +56,27 @@ async function handleSubmit() {
 <template>
   <div class="auth-wrap">
     <form class="auth-card" @submit.prevent="handleSubmit">
-      <h2>{{ isRegister ? "Naya account banayein" : "Login karein" }}</h2>
+      <div class="auth-top">
+        <h2>{{ isRegister ? t("authRegisterTitle") : t("authLoginTitle") }}</h2>
+        <div class="auth-lang"><LangSwitcher /></div>
+      </div>
 
       <template v-if="isRegister">
-        <input v-model="form.name" placeholder="Aap ka naam" required />
-        <input v-model="form.shopName" placeholder="Dukaan ka naam" />
+        <input v-model="form.name" :placeholder="t('authName')" required />
+        <input v-model="form.shopName" :placeholder="t('authShopName')" />
       </template>
 
       <input
         v-model="form.email"
         type="email"
-        placeholder="Email"
+        :placeholder="t('authEmail')"
         autocomplete="email"
         required
       />
       <input
         v-model="form.password"
         type="password"
-        :placeholder="isRegister ? 'Password (kam az kam 8 characters)' : 'Password'"
+        :placeholder="isRegister ? t('authPasswordReg') : t('authPassword')"
         :autocomplete="isRegister ? 'new-password' : 'current-password'"
         required
       />
@@ -68,15 +84,21 @@ async function handleSubmit() {
       <p v-if="error" class="error">{{ error }}</p>
 
       <button type="submit" :disabled="loading">
-        {{ loading ? "Intezar karein..." : isRegister ? "Account banayein" : "Login" }}
+        {{ loading ? t("authWait") : isRegister ? t("authCreateBtn") : t("authLoginBtn") }}
       </button>
 
       <p class="switch">
-        {{ isRegister ? "Pehle se account hai?" : "Naya account chahiye?" }}
+        {{ isRegister ? t("authHaveAccount") : t("authNeedAccount") }}
         <a href="#" @click.prevent="switchMode">
-          {{ isRegister ? "Login karein" : "Register karein" }}
+          {{ isRegister ? t("authSwitchLogin") : t("authSwitchReg") }}
         </a>
       </p>
+
+      <div class="demo-link-box">
+        <a href="/demo" class="demo-link" @click.prevent="emit('start-demo')">
+          {{ t("demoLiveLink") }} →
+        </a>
+      </div>
     </form>
   </div>
 </template>
@@ -98,8 +120,20 @@ async function handleSubmit() {
   border-radius: 12px;
 }
 .auth-card h2 {
-  margin: 0 0 6px 0;
+  margin: 0;
   color: #b5651d;
+}
+.auth-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.auth-lang {
+  background: #b5651d;
+  color: white;
+  border-radius: 8px;
 }
 input {
   padding: 10px;
@@ -131,5 +165,21 @@ button:disabled {
 .switch a {
   color: #b5651d;
   font-weight: bold;
+}
+.demo-link-box {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed #e0cbb0;
+  text-align: center;
+}
+.demo-link {
+  display: inline-block;
+  padding: 8px 14px;
+  background: white;
+  border: 1px solid #b5651d;
+  border-radius: 8px;
+  color: #b5651d;
+  font-weight: bold;
+  text-decoration: none;
 }
 </style>

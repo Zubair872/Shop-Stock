@@ -21,14 +21,34 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["owner", "admin", "manager", "cashier", "viewer"],
+      enum: ["owner", "admin", "manager", "cashier", "viewer", "superadmin"],
       default: "owner",
       index: true,
     },
     isActive: { type: Boolean, default: true, index: true },
+    plan: {
+      type: String,
+      enum: ["trial", "paid"],
+      default: "paid",
+      index: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "suspended"],
+      default: "active",
+      index: true,
+    },
+    trialEndsAt: { type: Date, default: null },
+    expiresAt: { type: Date, default: null, index: true },
+    notes: { type: String, trim: true, default: "" },
+    lastLoginAt: { type: Date, default: null },
+    isDemo: { type: Boolean, default: false, index: true },
+    demoExpiresAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
+
+userSchema.index({ demoExpiresAt: 1 }, { expireAfterSeconds: 3600 });
 
 userSchema.pre("validate", function () {
   if (!this.accountId && this._id) this.accountId = this._id;
